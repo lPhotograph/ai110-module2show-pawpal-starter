@@ -2,10 +2,37 @@
 
 ## 1. System Design
 
+**Core user actions**
+
+PawPal+ is built around three things a pet owner should always be able to do:
+
+1. **Set up their household — add an owner and their pet(s).** The user enters their own name and their availability/preferences (when the day starts and ends, how much free time they have, any blocked hours like work), then adds one or more pets with basic info (name, species, breed, age). This is the foundation everything else builds on: tasks belong to pets, and the schedule is shaped by the owner's preferences.
+
+2. **Add and manage care tasks.** For each pet, the user can add a task describing what needs to happen (e.g. "morning walk"), how long it takes, how important it is (low/medium/high), what type it is (walk, feeding, medication, grooming, enrichment), and optionally when it should happen — either a preferred window ("in the morning") or a fixed time it must occur ("meds at 08:00"). They can also say how often it repeats (once, daily, weekly). Tasks can be edited or removed.
+
+3. **Generate and view today's plan.** With one action, the user asks PawPal+ to build a schedule for the day. The scheduler looks at which tasks are due today, respects the hard constraints (fixed times, time budget, day boundaries), orders the rest by priority, and places each task that fits — honoring preferred windows when the day allows. The user then sees a clear, time-ordered plan for the day, along with an explanation of why each task landed where it did and why any tasks were skipped.
+
+---
+
 **a. Initial design**
 
 - Briefly describe your initial UML design.
+
+The design separates *data* classes from the *behavior* class (the scheduler), so the scheduling logic stays a pure, testable `tasks → Plan` function with no UI code in it.
+
 - What classes did you include, and what responsibilities did you assign to each?
+
+- **Owner** — holds owner name, their `Preferences`, and their pets.
+- **Pet** — basic pet info (name, species, breed, age); tasks belong to a pet.
+- **Preferences** — the owner's day-level constraints: day start/end, total available minutes, and blocked windows (e.g. work hours).
+- **TimeWindow** — a start/end span; used for preferred slots and blocked periods.
+- **Task** — *what* needs to happen: title, duration, priority, type, optional preferred window or fixed start, and recurrence. Does not know *when* it will run.
+- **ScheduledTask** — a `Task` placed on the timeline at a concrete start/end, plus a `reason` explaining the placement.
+- **Plan** — the scheduler's output for a day: the scheduled tasks, the skipped ones (with reasons), and a summary.
+- **Scheduler** — the only behavior class: turns tasks + preferences into a `Plan`.
+- Enums (**Priority**, **TaskType**, **Recurrence**) replace magic strings.
+
+
 
 **b. Design changes**
 
