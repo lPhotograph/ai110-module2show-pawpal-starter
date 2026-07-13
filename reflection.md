@@ -65,6 +65,12 @@ Net effect: the stubs are now internally consistent and implementable, rather th
 - Describe one tradeoff your scheduler makes.
 - Why is that tradeoff reasonable for this scenario?
 
+The scheduler is **greedy, not optimal**. It places tasks one at a time — fixed-time tasks first, then the rest in priority order (highest priority first, shorter tasks breaking ties) — and each task takes the earliest slot that fits. It never backtracks or rearranges tasks it already placed. This means it can skip a task that a smarter, rearranging algorithm would have fit: e.g. a big low-priority task grabs an early slot, leaving no room for two small tasks that together would have been more valuable. Finding the truly optimal packing is a bin-packing/knapsack problem, which is expensive and hard to explain.
+
+This tradeoff is reasonable for a personal pet-care planner. The task lists are small (a handful per day), so the difference between greedy and optimal is rarely more than one skipped low-priority item. More importantly, the greedy order is **easy to explain**: every placement records a plain-English reason ("High priority — placed in the first open slot"), and skipped tasks say why. For this scenario, a plan the owner can understand and trust is worth more than squeezing out a theoretically optimal one.
+
+A related, deliberate simplification: **conflict detection only checks fixed-time tasks.** Flexible tasks can never overlap because the `Timeline` arranges them around each other, so the only real clash is two tasks demanding the same fixed time — that is all `detect_conflicts` looks for, rather than re-scanning the whole finished schedule.
+
 ---
 
 ## 3. AI Collaboration

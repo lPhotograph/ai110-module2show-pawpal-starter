@@ -86,14 +86,41 @@ Sample test output:
 
 ## 📐 Smarter Scheduling
 
-> Fill in once you've implemented scheduling logic.
+Beyond placing tasks on a timeline, PawPal+ implements several "smarter"
+behaviors. Each is documented below with the method that implements it (all in
+`pawpal/pawpal_system.py`).
 
 | Feature | Method(s) | Notes |
 |---------|-----------|-------|
-| Task sorting | | e.g., by priority, duration |
-| Filtering | | e.g., skip tasks if time runs out |
-| Conflict handling | | e.g., overlapping time slots |
-| Recurring tasks | | e.g., daily vs. weekly |
+| Task sorting | `Scheduler.sort_tasks()` | Orders tasks by priority (highest first), then shorter duration first as a tie-breaker. Used internally by `build_plan` and available on its own. |
+| Filtering | `Owner.filter_tasks(pet_name, completed)` | Returns tasks across all pets, filtered by pet name and/or completion status. Passing `None` for a field skips that filter. |
+| Conflict detection | `Scheduler.detect_conflicts()` | Lightweight pairwise check over fixed-time tasks (same or different pets). Returns human-readable warning strings and never raises; results are also stored on `Plan.warnings`. |
+| Recurring tasks | `Task.is_due()`, `Task.next_occurrence()`, `Pet.complete_task()` | `is_due` decides whether a daily/weekly/once task applies on a given day. Completing a recurring task via `complete_task` auto-creates its next occurrence (`next_occurrence`), stamped with a `not_before` date so it isn't re-scheduled the same day. |
+| Fixed vs. flexible placement | `Scheduler._place_fixed()`, `Scheduler._place()` | Fixed-time tasks claim their exact slot first; flexible tasks fill the gaps, honoring a preferred window as a *soft* preference. |
+| Free/busy time model | `Timeline.free_intervals()`, `Timeline.find_slot()`, `Timeline.reserve()` | Tracks open vs. occupied time so tasks never overlap and blocked periods (e.g. work hours) are respected. |
+
+### Feature details
+
+- **Sorting behavior — `Scheduler.sort_tasks(tasks)`**
+  A static method that sorts by `(-priority.weight, duration_minutes)`: higher
+  priority wins, and among equal priorities the shorter task goes first so more
+  tasks fit.
+
+- **Filtering behavior — `Owner.filter_tasks(pet_name=None, completed=None)`**
+  Filter the household's tasks by pet (`pet_name="Leo"`) and/or by completion
+  status (`completed=False` for pending, `True` for done). Both are optional.
+
+- **Conflict detection — `Scheduler.detect_conflicts(tasks, day)`**
+  Only fixed-time tasks can truly clash (flexible tasks are arranged around each
+  other). It compares each pair's `[start, start+duration)` window and returns a
+  warning for every overlap, e.g.
+  `Time conflict: Leo's Meds (08:00-08:10) overlaps Luna's Insulin (08:00-08:10).`
+
+- **Recurring task logic — `Task.is_due()` / `Task.next_occurrence()` / `Pet.complete_task()`**
+  Tasks recur `DAILY`, `WEEKLY` (anchored to a weekday), or `ONCE` (anchored to a
+  date). Marking a recurring task complete spawns the next occurrence (+1 day or
+  +7 days) with a `not_before` guard so today's finished walk rolls to tomorrow
+  instead of reappearing today.
 
 ## 📸 Demo Walkthrough
 

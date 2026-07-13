@@ -17,8 +17,8 @@ Scheduler places tasks onto).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import date, time
+from dataclasses import dataclass, field, replace
+from datetime import date, time, timedelta
 from enum import Enum
 
 
@@ -142,6 +142,10 @@ class Task:
       * DAILY  -> due every day.
       * WEEKLY -> due when `day.weekday() == weekday` (0=Mon .. 6=Sun).
       * ONCE   -> due only on `due_date`.
+
+    `not_before` suppresses a task until a given date. It is set on the *next*
+    occurrence spawned when a recurring task is completed, so completing today's
+    walk does not make it due again today (see `next_occurrence`).
     """
 
     title: str
@@ -155,9 +159,12 @@ class Task:
     due_date: date | None = None  # anchor for ONCE
     weekday: int | None = None  # anchor for WEEKLY (0=Mon .. 6=Sun)
     completed: bool = False
+    not_before: date | None = None  # earliest day this occurrence may be scheduled
 
     def is_due(self, day: date) -> bool:
         """Return True if this task should be scheduled on `day`."""
+        if self.not_before is not None and day < self.not_before:
+            return False
         if self.recurrence is Recurrence.DAILY:
             return True
         if self.recurrence is Recurrence.WEEKLY:
@@ -177,6 +184,20 @@ class Task:
     def reset(self) -> None:
         """Mark this task not-done again (e.g. at the start of a new day)."""
         self.completed = False
+
+    def next_occurrence(self, completed_on: date) -> "Task | None":
+        """Build the next occurrence after completing this task on `completed_on`.
+
+        Returns a fresh, not-completed copy for DAILY (next day) and WEEKLY
+        (next week) tasks; returns None for ONCE tasks (they do not repeat).
+        """
+        if self.recurrence is Recurrence.DAILY:
+            gap = timedelta(days=1)
+        elif self.recurrence is Recurrence.WEEKLY:
+            gap = timedelta(days=7)
+        else:  # ONCE
+            return None
+        return replace(self, completed=False, not_before=completed_on + gap)
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +226,18 @@ class Pet:
         if task in self.tasks:
             self.tasks.remove(task)
 
+    def complete_task(self, task: Task, on: date) -> Task | None:
+        """Mark `task` done and, if it recurs, append its next occurrence.
+
+        Returns the newly created next-occurrence task (added to this pet), or
+        None if the task does not repeat.
+        """
+        task.mark_complete()
+        nxt = task.next_occurrence(on)
+        if nxt is not None:
+            self.tasks.append(nxt)
+        return nxt
+
 
 @dataclass
 class Owner:
@@ -222,6 +255,22 @@ class Owner:
     def all_tasks(self) -> list[Task]:
         """Return every task across all pets as one flat list."""
         return [task for pet in self.pets for task in pet.tasks]
+
+    def filter_tasks(
+        self, pet_name: str | None = None, completed: bool | None = None
+    ) -> list[Task]:
+        """Return tasks across all pets, optionally filtered.
+
+        Pass `pet_name` to keep only one pet's tasks, and/or `completed` to keep
+        only done (`True`) or pending (`False`) tasks. `None` means "don't filter
+        on that field".
+        """
+        tasks = self.all_tasks()
+        if pet_name is not None:
+            tasks = [t for t in tasks if t.pet_name == pet_name]
+        if completed is not None:
+            tasks = [t for t in tasks if t.completed == completed]
+        return tasks
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +295,7 @@ class Plan:
     day: date
     scheduled: list[ScheduledTask] = field(default_factory=list)
     skipped: list[tuple[Task, str]] = field(default_factory=list)  # (task, why skipped)
+    warnings: list[str] = field(default_factory=list)  # e.g. fixed-time clashes
 
     @property
     def total_minutes(self) -> int:
@@ -273,6 +323,10 @@ class Plan:
                 lines.append(
                     f"  {who}{task.title} ({task.duration_minutes} min) - {why}"
                 )
+        if self.warnings:
+            lines.append("Warnings:")
+            for warning in self.warnings:
+                lines.append(f"  ! {warning}")
         return "\n".join(lines)
 
 
@@ -373,10 +427,12 @@ class Scheduler:
         timeline = self._build_timeline(day)
 
         due = self._due_tasks(tasks, day)
+        plan.warnings = self.detect_conflicts(due, day)
+
         fixed = sorted(
             (t for t in due if t.is_fixed()), key=lambda t: _to_minutes(t.fixed_start)
         )
-        flexible = self._sort_tasks([t for t in due if not t.is_fixed()])
+        flexible = self.sort_tasks([t for t in due if not t.is_fixed()])
 
         # 3. Fixed-time tasks claim their exact slots first.
         for task in fixed:
@@ -416,9 +472,49 @@ class Scheduler:
             busy=list(self.preferences.blocked_windows),
         )
 
-    def _sort_tasks(self, tasks: list[Task]) -> list[Task]:
-        """Order non-fixed tasks by priority (desc) then duration (asc)."""
+    @staticmethod
+    def sort_tasks(tasks: list[Task]) -> list[Task]:
+        """Order tasks by priority (highest first), then shorter duration first."""
         return sorted(tasks, key=lambda t: (-t.priority.weight, t.duration_minutes))
+
+    def detect_conflicts(self, tasks: list[Task], day: date) -> list[str]:
+        """Return warning messages for fixed-time tasks that clash on `day`.
+
+        Lightweight, pairwise check: only fixed-start tasks assert a specific
+        time (flexible tasks are arranged around each other and never clash).
+        Two fixed tasks conflict when their [start, start+duration) windows
+        overlap -- whether they belong to the same pet or different pets.
+        Returns a list of human-readable warnings; never raises.
+        """
+        fixed = [
+            t
+            for t in tasks
+            if t.is_due(day) and not t.completed and t.is_fixed()
+        ]
+        windows = [
+            (
+                t,
+                TimeWindow(
+                    t.fixed_start,
+                    _to_time(_to_minutes(t.fixed_start) + t.duration_minutes),
+                ),
+            )
+            for t in fixed
+        ]
+
+        warnings: list[str] = []
+        for i, (task_a, win_a) in enumerate(windows):
+            for task_b, win_b in windows[i + 1:]:
+                if win_a.overlaps(win_b):
+                    who_a = f"{task_a.pet_name}'s " if task_a.pet_name else ""
+                    who_b = f"{task_b.pet_name}'s " if task_b.pet_name else ""
+                    warnings.append(
+                        f"Time conflict: {who_a}{task_a.title} "
+                        f"({win_a.start:%H:%M}-{win_a.end:%H:%M}) overlaps "
+                        f"{who_b}{task_b.title} "
+                        f"({win_b.start:%H:%M}-{win_b.end:%H:%M})."
+                    )
+        return warnings
 
     def _place_fixed(self, task: Task, timeline: Timeline) -> ScheduledTask | None:
         """Place a fixed-time `task` at its exact start, if the slot is free."""

@@ -10,7 +10,7 @@ launched as `pytest` or `python -m pytest`, without needing a conftest.py.
 """
 
 import sys
-from datetime import date, time
+from datetime import date, time, timedelta
 from pathlib import Path
 
 # Make the project root importable (this file lives in tests/).
@@ -112,6 +112,60 @@ def test_completion_toggle():
     assert t.completed is False
 
 
+def test_not_before_suppresses_until_date():
+    t = Task("Walk", 30, recurrence=Recurrence.DAILY, not_before=date(2026, 1, 2))
+    assert t.is_due(date(2026, 1, 1)) is False  # before not_before
+    assert t.is_due(date(2026, 1, 2)) is True  # on/after not_before
+
+
+class TestNextOccurrence:
+    def test_daily_spawns_next_day_and_not_due_today(self):
+        t = Task("Walk", 30, recurrence=Recurrence.DAILY)
+        nxt = t.next_occurrence(DAY)
+        assert nxt is not None
+        assert nxt.completed is False
+        assert nxt.not_before == DAY + timedelta(days=1)
+        assert nxt.is_due(DAY) is False  # not again today
+        assert nxt.is_due(DAY + timedelta(days=1)) is True
+
+    def test_weekly_spawns_seven_days_later(self):
+        t = Task("Brush", 15, recurrence=Recurrence.WEEKLY, weekday=DAY.weekday())
+        nxt = t.next_occurrence(DAY)
+        assert nxt.not_before == DAY + timedelta(days=7)
+
+    def test_once_does_not_repeat(self):
+        t = Task("Vet", 30, recurrence=Recurrence.ONCE, due_date=DAY)
+        assert t.next_occurrence(DAY) is None
+
+
+class TestPetCompleteTask:
+    def test_completing_daily_appends_next_occurrence(self):
+        pet = Pet("Leo")
+        walk = pet.add_task(Task("Walk", 30, recurrence=Recurrence.DAILY))
+        nxt = pet.complete_task(walk, on=DAY)
+        assert walk.completed is True
+        assert nxt in pet.tasks
+        assert len(pet.tasks) == 2  # original (done) + next occurrence
+
+    def test_completing_once_appends_nothing(self):
+        pet = Pet("Leo")
+        vet = pet.add_task(Task("Vet", 30, recurrence=Recurrence.ONCE, due_date=DAY))
+        result = pet.complete_task(vet, on=DAY)
+        assert result is None
+        assert len(pet.tasks) == 1
+
+    def test_completed_daily_not_rescheduled_same_day(self):
+        # Regression: completing today's task must not make it due again today.
+        prefs = Preferences(day_start=time(7, 0), day_end=time(21, 0))
+        owner = Owner("Jordan", preferences=prefs)
+        pet = owner.add_pet(Pet("Leo"))
+        walk = pet.add_task(Task("Walk", 30, recurrence=Recurrence.DAILY))
+        pet.complete_task(walk, on=DAY)
+
+        plan = Scheduler(prefs).plan_for_owner(owner, DAY)
+        assert plan.scheduled == []  # nothing due today anymore
+
+
 # ---------------------------------------------------------------------------
 # Preferences
 # ---------------------------------------------------------------------------
@@ -146,6 +200,49 @@ def test_owner_all_tasks_aggregates_across_pets():
     all_tasks = owner.all_tasks()
     assert len(all_tasks) == 3
     assert {t.pet_name for t in all_tasks} == {"Leo", "Luna"}
+
+
+def _owner_with_mixed_tasks() -> Owner:
+    owner = Owner("Jordan")
+    leo = owner.add_pet(Pet("Leo"))
+    luna = owner.add_pet(Pet("Luna"))
+    leo.add_task(Task("Walk", 30))
+    done = leo.add_task(Task("Meds", 10))
+    done.mark_complete()
+    luna.add_task(Task("Feed", 10))
+    return owner
+
+
+class TestOwnerFilterTasks:
+    def test_filter_by_pet_name(self):
+        owner = _owner_with_mixed_tasks()
+        titles = {t.title for t in owner.filter_tasks(pet_name="Leo")}
+        assert titles == {"Walk", "Meds"}
+
+    def test_filter_by_completion(self):
+        owner = _owner_with_mixed_tasks()
+        assert {t.title for t in owner.filter_tasks(completed=True)} == {"Meds"}
+        assert {t.title for t in owner.filter_tasks(completed=False)} == {"Walk", "Feed"}
+
+    def test_filters_combine(self):
+        owner = _owner_with_mixed_tasks()
+        result = owner.filter_tasks(pet_name="Leo", completed=False)
+        assert [t.title for t in result] == ["Walk"]
+
+    def test_no_filters_returns_everything(self):
+        owner = _owner_with_mixed_tasks()
+        assert len(owner.filter_tasks()) == 3
+
+
+def test_sort_tasks_orders_by_priority_then_duration():
+    tasks = [
+        Task("Low", 30, priority=Priority.LOW),
+        Task("HighLong", 30, priority=Priority.HIGH),
+        Task("HighShort", 10, priority=Priority.HIGH),
+        Task("Med", 20, priority=Priority.MEDIUM),
+    ]
+    ordered = [t.title for t in Scheduler.sort_tasks(tasks)]
+    assert ordered == ["HighShort", "HighLong", "Med", "Low"]
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +379,37 @@ class TestScheduler:
         text = plan.summary()
         assert "Daily plan for 2026-01-01" in text
         assert "Walk" in text
+
+    def test_detect_conflicts_flags_overlapping_fixed_times(self):
+        sched = make_scheduler()
+        tasks = [
+            Task("Meds", 10, pet_name="Leo", fixed_start=time(8, 0)),
+            Task("Insulin", 10, pet_name="Luna", fixed_start=time(8, 5)),
+        ]
+        warnings = sched.detect_conflicts(tasks, DAY)
+        assert len(warnings) == 1
+        assert "conflict" in warnings[0].lower()
+        assert "Meds" in warnings[0] and "Insulin" in warnings[0]
+
+    def test_detect_conflicts_ignores_non_overlapping_and_flexible(self):
+        sched = make_scheduler()
+        tasks = [
+            Task("Meds", 10, fixed_start=time(8, 0)),
+            Task("Feed", 10, fixed_start=time(8, 30)),  # after Meds, no overlap
+            Task("Walk", 30),  # flexible, cannot conflict
+        ]
+        assert sched.detect_conflicts(tasks, DAY) == []
+
+    def test_build_plan_records_conflict_in_warnings(self):
+        sched = make_scheduler()
+        tasks = [
+            Task("Meds", 10, fixed_start=time(8, 0)),
+            Task("Insulin", 10, fixed_start=time(8, 0)),
+        ]
+        plan = sched.build_plan(tasks, DAY)
+        assert len(plan.warnings) == 1
+        assert len(plan.scheduled) == 1  # one placed
+        assert len(plan.skipped) == 1  # the clashing one skipped, not crashed
 
     def test_plan_for_owner_pulls_tasks_across_pets(self):
         owner = Owner("Jordan", preferences=Preferences())
