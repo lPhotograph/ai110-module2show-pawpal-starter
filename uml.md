@@ -56,10 +56,12 @@ classDiagram
         +date due_date
         +int weekday
         +bool completed
+        +date not_before
         +is_due(day) bool
         +is_fixed() bool
         +mark_complete() void
         +reset() void
+        +next_occurrence(completed_on) Task
     }
 
     class Pet {
@@ -70,6 +72,7 @@ classDiagram
         +list~Task~ tasks
         +add_task(task) Task
         +remove_task(task) void
+        +complete_task(task, on) Task
     }
 
     class Owner {
@@ -78,6 +81,7 @@ classDiagram
         +list~Pet~ pets
         +add_pet(pet) Pet
         +all_tasks() list~Task~
+        +filter_tasks(pet_name, completed) list~Task~
     }
 
     class ScheduledTask {
@@ -91,6 +95,7 @@ classDiagram
         +date day
         +list~ScheduledTask~ scheduled
         +list~tuple~ skipped
+        +list~str~ warnings
         +total_minutes() int
         +summary() str
     }
@@ -108,9 +113,10 @@ classDiagram
         +Preferences preferences
         +plan_for_owner(owner, day) Plan
         +build_plan(tasks, day) Plan
+        +sort_tasks(tasks) list~Task~
+        +detect_conflicts(tasks, day) list~str~
         -_due_tasks(tasks, day) list
         -_build_timeline(day) Timeline
-        -_sort_tasks(tasks) list
         -_place_fixed(task, timeline) ScheduledTask
         -_place(task, timeline) ScheduledTask
         -_within(inner, outer) bool
@@ -119,6 +125,7 @@ classDiagram
     Owner "1" --> "1" Preferences : has
     Owner "1" --> "*" Pet : owns
     Pet "1" --> "*" Task : has tasks
+    Pet ..> Task : spawns next occurrence
     Preferences "1" --> "*" TimeWindow : blocked_windows
     Task "1" --> "1" Priority
     Task "1" --> "1" TaskType
@@ -128,6 +135,7 @@ classDiagram
     Plan "1" --> "*" ScheduledTask : scheduled
     Plan "1" --> "*" Task : skipped
     Scheduler "1" --> "1" Preferences : uses
+    Scheduler ..> Owner : reads (plan_for_owner)
     Scheduler ..> Timeline : builds
     Scheduler ..> Plan : produces
     Timeline "1" --> "*" TimeWindow : busy / free

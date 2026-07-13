@@ -22,6 +22,37 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## ✨ Features
+
+PawPal+ turns a list of care tasks into an explainable daily plan. The
+scheduling algorithms it implements:
+
+- **Priority sorting** — tasks are ordered highest-priority first, with shorter
+  tasks breaking ties so more of the day gets used (`Scheduler.sort_tasks`).
+- **Chronological schedule output** — the generated plan is returned in
+  start-time order, regardless of the order tasks were entered.
+- **Fixed-time placement** — tasks with a required time (e.g. meds at 08:00)
+  claim their exact slot first; everything else flows around them.
+- **Soft preferred windows** — a task can prefer a window (e.g. "morning walk");
+  the scheduler honors it when possible and relaxes it when the day is full.
+- **Blocked-time awareness** — periods the owner is unavailable (e.g. work hours)
+  are never scheduled over.
+- **No double-booking** — a free/busy timeline guarantees placed tasks never
+  overlap.
+- **Conflict warnings** — two tasks demanding the same fixed time are flagged
+  with a plain-English warning instead of crashing (`Scheduler.detect_conflicts`).
+- **Daily / weekly / one-off recurrence** — tasks can repeat daily, on a chosen
+  weekday, or happen once on a date (`Task.is_due`).
+- **Auto-regenerating recurring tasks** — completing a daily/weekly task
+  automatically creates its next occurrence for the following day/week
+  (`Pet.complete_task` → `Task.next_occurrence`).
+- **Filtering** — view tasks by pet and/or completion status
+  (`Owner.filter_tasks`).
+- **Explainable plans** — every scheduled task carries a reason, and skipped
+  tasks say why they were dropped.
+- **Multi-pet households** — one owner can manage several pets; the plan
+  aggregates and labels tasks across all of them.
+
 ## Getting started
 
 ### Setup
@@ -153,12 +184,108 @@ behaviors. Each is documented below with the method that implements it (all in
 
 ## 📸 Demo Walkthrough
 
-Describe your app in numbered steps so a reader can follow along without watching a video:
+### Running the app
 
-1. <!-- Describe this step -->
-2. <!-- Describe this step -->
-3. <!-- Describe this step -->
-4. <!-- Describe this step -->
-5. <!-- Add more steps as needed -->
+```bash
+streamlit run app.py
+```
 
-**Screenshot or video** *(optional)*: <!-- Insert a screenshot or link to a demo video here -->
+### What the UI lets you do
+
+The Streamlit app is organized top-to-bottom:
+
+- **Owner & day preferences** — set the owner's name, the day's start/end times,
+  and optionally block a work period (nothing is scheduled during it).
+- **Pets** — add one or more pets (name + species). New pets appear immediately
+  because the owner is persisted in `st.session_state`.
+- **Add a care task** — pick which pet the task is for, then enter a title,
+  duration, priority, and type. Optionally mark it as a **fixed-time** task or
+  give it a **preferred window**.
+- **Current tasks** — a table of tasks, **filtered** (one pet or all pets) and
+  **sorted by priority**. A checkbox toggles the household-wide view.
+- **Today's schedule** — the **Generate schedule** button builds the plan and
+  displays it as a table, with a green success banner, any conflict warnings,
+  and a list of skipped tasks with reasons.
+
+### Example workflow
+
+1. Set the day window to **07:00–21:00** and block **09:00–17:00** for work.
+2. Add a pet: **Leo** (dog). Add another: **Luna** (cat).
+3. For Leo, add **"Morning walk"** (30 min, high) with a preferred window of
+   07:00–09:00, and **"Meds"** (10 min, high) fixed at **08:00**.
+4. For Luna, add **"Feeding"** (10 min, high) and **"Insulin"** (10 min) also
+   fixed at **08:00** — deliberately clashing with Leo's Meds.
+5. Click **Generate schedule** and read the plan.
+
+### Key scheduler behaviors shown
+
+- **Priority sorting** — high-priority tasks (Feeding, Morning walk) are placed
+  before lower-priority ones.
+- **Fixed-time placement** — Meds lands exactly at 08:00; flexible tasks flow
+  around it.
+- **Blocked time respected** — nothing is scheduled during 09:00–17:00.
+- **Conflict warning** — Leo's Meds and Luna's Insulin both want 08:00, so a
+  ⚠️ warning appears and one is skipped (the app keeps running).
+- **Explainability** — each row shows *why* the task landed where it did.
+
+### Sample CLI output (`python main.py`)
+
+The demo script exercises the sorting, filtering, conflict-detection, and
+scheduling logic in the terminal:
+
+```
+============================================================
+PawPal+ demo for Jordan
+============================================================
+
+All tasks (insertion order):
+  [done]   Leo: Evening walk   low     30 min
+  [todo]   Leo: Morning walk   high    30 min
+  [todo]   Leo: Brush coat     medium  15 min
+  [todo]   Leo: Meds           high    10 min
+  [done]  Luna: Playtime       low     20 min
+  [todo]  Luna: Feeding        high    10 min
+  [todo]  Luna: Insulin        high    10 min
+
+Pending only (filter completed=False):
+  [todo]   Leo: Morning walk   high    30 min
+  [todo]   Leo: Brush coat     medium  15 min
+  [todo]   Leo: Meds           high    10 min
+  [todo]  Luna: Feeding        high    10 min
+  [todo]  Luna: Insulin        high    10 min
+
+Completed only (filter completed=True):
+  [done]   Leo: Evening walk   low     30 min
+  [done]  Luna: Playtime       low     20 min
+
+Leo's tasks only (filter pet_name='Leo'):
+  [done]   Leo: Evening walk   low     30 min
+  [todo]   Leo: Morning walk   high    30 min
+  [todo]   Leo: Brush coat     medium  15 min
+  [todo]   Leo: Meds           high    10 min
+
+Pending tasks sorted by priority (Scheduler.sort_tasks):
+  [todo]   Leo: Meds           high    10 min
+  [todo]  Luna: Feeding        high    10 min
+  [todo]  Luna: Insulin        high    10 min
+  [todo]   Leo: Morning walk   high    30 min
+  [todo]   Leo: Brush coat     medium  15 min
+
+Conflict check (Scheduler.detect_conflicts):
+  ! Time conflict: Leo's Meds (08:00-08:10) overlaps Luna's Insulin (08:00-08:10).
+
+============================================================
+Today's Schedule
+============================================================
+Daily plan for 2026-07-12:
+  07:00-07:10  Luna's Feeding (10 min) [high] - High priority - placed in the first open slot.
+  07:10-07:40  Leo's Morning walk (30 min) [high] - High priority - placed in the first open slot.
+  07:40-07:55  Leo's Brush coat (15 min) [medium] - Medium priority - placed in the first open slot.
+  08:00-08:10  Leo's Meds (10 min) [high] - Fixed time - must occur at 08:00.
+Skipped:
+  Luna's Insulin (10 min) - Fixed time 08:00 does not fit (outside the day or conflicts with another commitment).
+Warnings:
+  ! Time conflict: Leo's Meds (08:00-08:10) overlaps Luna's Insulin (08:00-08:10).
+------------------------------------------------------------
+Total scheduled time: 65 minutes
+```

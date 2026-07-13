@@ -137,12 +137,24 @@ if st.button("Add task"):
     st.success(f"Added “{task_title}” for {pet.name}.")
 
 # ---------------------------------------------------------------------------
-# Current tasks
+# Current tasks -- filtered (Owner.filter_tasks) and sorted (Scheduler.sort_tasks)
 # ---------------------------------------------------------------------------
-st.subheader(f"Current tasks for {pet.name}")
-if pet.tasks:
+st.subheader("Current tasks")
+
+view_all = st.checkbox("Show tasks for all pets", value=False)
+
+# Filtering: one pet or the whole household.
+if view_all:
+    task_view = owner.all_tasks()
+else:
+    task_view = owner.filter_tasks(pet_name=pet.name)
+
+# Sorting: highest priority first, shorter duration to break ties.
+task_view = Scheduler.sort_tasks(task_view)
+
+if task_view:
     rows = []
-    for t in pet.tasks:
+    for t in task_view:
         if t.is_fixed():
             when = f"fixed {t.fixed_start:%H:%M}"
         elif t.preferred_window is not None:
@@ -154,17 +166,19 @@ if pet.tasks:
             when = "flexible"
         rows.append(
             {
+                "Pet": t.pet_name,
                 "Task": t.title,
                 "Min": t.duration_minutes,
                 "Priority": t.priority.name.lower(),
                 "Type": t.task_type.value,
                 "When": when,
-                "Done": t.completed,
+                "Done": "✓" if t.completed else "",
             }
         )
+    st.caption("Sorted by priority (highest first), then shortest duration.")
     st.table(rows)
 
-    if st.button("Clear all tasks"):
+    if st.button(f"Clear {pet.name}'s tasks"):
         pet.tasks.clear()
 else:
     st.info("No tasks yet. Add one above.")
@@ -180,25 +194,47 @@ if st.button("Generate schedule", type="primary"):
     scheduler = Scheduler(owner.preferences)
     plan = scheduler.plan_for_owner(owner, date.today())
 
-    st.markdown(f"**Plan for {owner.name} — {date.today():%A, %B %d, %Y}**")
+    owner_label = owner.name or "your pets"
+    st.markdown(f"**Plan for {owner_label} — {date.today():%A, %B %d, %Y}**")
+
+    # Conflict warnings first, so they're impossible to miss.
+    for warning in plan.warnings:
+        st.warning(warning, icon="⚠️")
 
     if plan.scheduled:
-        for item in plan.scheduled:
-            t = item.task
-            st.markdown(
-                f"- **{item.start:%H:%M}–{item.end:%H:%M}** · "
-                f"{t.pet_name}'s {t.title} ({t.duration_minutes} min) "
-                f"`[{t.priority.name.lower()}]`  \n"
-                f"  _{item.reason}_"
-            )
-        st.caption(f"Total scheduled time: {plan.total_minutes} minutes")
+        st.success(
+            f"Scheduled {len(plan.scheduled)} task(s) — "
+            f"{plan.total_minutes} minutes total."
+        )
+        st.table(
+            [
+                {
+                    "Time": f"{item.start:%H:%M}–{item.end:%H:%M}",
+                    "Pet": item.task.pet_name,
+                    "Task": item.task.title,
+                    "Min": item.task.duration_minutes,
+                    "Priority": item.task.priority.name.lower(),
+                    "Why": item.reason,
+                }
+                for item in plan.scheduled
+            ]
+        )
     else:
         st.info("Nothing could be scheduled for today.")
 
     if plan.skipped:
         st.markdown("**Skipped**")
-        for task, why in plan.skipped:
-            st.markdown(f"- {task.title} ({task.duration_minutes} min) — {why}")
+        st.table(
+            [
+                {
+                    "Pet": task.pet_name,
+                    "Task": task.title,
+                    "Min": task.duration_minutes,
+                    "Reason": why,
+                }
+                for task, why in plan.skipped
+            ]
+        )
 
     with st.expander("Plain-text plan (copy/paste)"):
         st.code(plan.summary(), language="text")
