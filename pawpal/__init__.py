@@ -15,6 +15,7 @@ from .pawpal_system import (
     ScheduledTask,
     Task,
     TaskType,
+    Timeline,
     TimeWindow,
 )
 
@@ -29,5 +30,6 @@ __all__ = [
     "ScheduledTask",
     "Task",
     "TaskType",
+    "Timeline",
     "TimeWindow",
 ]

@@ -39,6 +39,18 @@ The design separates *data* classes from the *behavior* class (the scheduler), s
 - Did your design change during implementation?
 - If yes, describe at least one change and why you made it.
 
+Yes. Reviewing the skeleton before writing logic surfaced several gaps where the intended design and the actual classes didn't match. The main changes:
+
+- **Linked tasks to pets.** `Task` gained a `pet_name` field. The UML said "tasks belong to a pet," but nothing in the code captured that, so a multi-pet plan couldn't tell whose task was whose. Storing tasks as a flat list that each carry a `pet_name` label keeps the scheduler a simple `list[Task] -> Plan` function while still letting the plan say "Mochi's walk."
+
+- **Made recurrence actually checkable.** Added `due_date` (for ONCE) and `weekday` (for WEEKLY) anchors to `Task`. `is_due(day)` had no way to answer "is this weekly task due today?" without knowing *which* day it repeats on — only DAILY was implementable before.
+
+- **Replaced the single "cursor" with a `Timeline` class.** The original `_place(task, cursor, ...)` walked one pointer forward, which can't flow around a fixed-time task, avoid overlaps, or skip blocked windows. A `Timeline` that tracks free/busy intervals and hands out slots (`find_slot`, `reserve`) makes fixed times, overlaps, blocked windows, and preferred windows all fall out of one structure.
+
+- **Removed the separate `available_minutes` budget.** Preferences had a flat minute budget *and* day bounds *and* blocked windows — three notions of "time available" that could contradict each other. I made the real timeline (day span minus blocked windows) the single source of truth, so `_fits`-style budget math can't disagree with where tasks actually land.
+
+Net effect: the stubs are now internally consistent and implementable, rather than describing an algorithm the class shapes couldn't support.
+
 ---
 
 ## 2. Scheduling Logic and Tradeoffs

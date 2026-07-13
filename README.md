@@ -44,15 +44,29 @@ pip install -r requirements.txt
 
 ## 🖥️ Sample Output
 
-Paste a sample of your app's CLI or Streamlit output here so a reader can see what a generated plan looks like:
+Terminal output from running the demo script (`python main.py`), which builds an
+owner (Jordan) with two pets (Leo the dog, Luna the cat) and schedules their care
+tasks for the day. The owner is free 07:00–21:00 but blocked for work 09:00–17:00.
 
 ```
-# e.g.:
-# Daily plan for Biscuit (Golden Retriever):
-#   08:00 — Morning walk (30 min) [priority: high]
-#   09:00 — Feeding (10 min) [priority: high]
-#   ...
+============================================================
+Today's Schedule for Jordan
+============================================================
+Daily plan for 2026-07-12:
+  07:00-07:10  Luna's Feeding (10 min) [high] - High priority - placed in the first open slot.
+  07:10-07:40  Leo's Morning walk (30 min) [high] - High priority - placed within its preferred window.
+  07:40-07:55  Luna's Weekly brush (15 min) [medium] - Medium priority - placed in the first open slot.
+  08:00-08:10  Leo's Meds (10 min) [high] - Fixed time - must occur at 08:00.
+  08:10-08:30  Luna's Playtime (20 min) [low] - Low priority - placed in the first open slot.
+  17:00-17:30  Leo's Evening walk (30 min) [medium] - Medium priority - placed within its preferred window.
+------------------------------------------------------------
+Total scheduled time: 115 minutes
 ```
+
+Notice how the plan respects the constraints: the fixed-time **Meds** task lands
+exactly at 08:00 and the flexible tasks flow around it; nothing is scheduled
+during the 09:00–17:00 work block, so the **Evening walk** waits until 17:00; and
+each line explains *why* the task was placed there.
 
 ## 🧪 Testing PawPal+
 
