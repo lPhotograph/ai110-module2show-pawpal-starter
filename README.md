@@ -70,19 +70,48 @@ each line explains *why* the task was placed there.
 
 ## 🧪 Testing PawPal+
 
+Run the full test suite from the project root:
+
 ```bash
-# Run the full test suite:
-pytest
+python -m pytest
 
-# Run with coverage:
-pytest --cov
+# Or with coverage:
+python -m pytest --cov=pawpal
 ```
 
-Sample test output:
+The suite (`tests/test_pawpal.py`, 48 tests) covers:
+
+- **Time helpers** — `TimeWindow.contains` / `overlaps` / `duration_minutes` (half-open ranges; touching edges don't overlap).
+- **Task model** — recurrence due-logic (daily/weekly/once), the `not_before` guard, completion toggling, and `is_fixed`.
+- **Sorting** — `Scheduler.sort_tasks` orders by priority then duration; the generated plan comes out in chronological order.
+- **Filtering** — `Owner.filter_tasks` by pet name, completion status, both, or neither.
+- **Recurrence regeneration** — completing a daily/weekly task spawns its next occurrence (and one-off tasks don't repeat); a completed daily task is not re-scheduled the same day.
+- **Scheduling** — fixed-time placement, blocked windows and day bounds respected, soft preferred windows, tasks that don't fit are skipped, and the no-overlap invariant.
+- **Conflict detection** — duplicate/overlapping fixed times are flagged as warnings without crashing.
+
+Successful test run:
 
 ```
-# Paste your pytest output here
+============================= test session starts =============================
+platform win32 -- Python 3.13.14, pytest-9.0.3, pluggy-1.6.0
+rootdir: C:\Users\titi0\OneDrive\Documents\VSC\AI_110\Week_4\pawpal-starter-main
+plugins: anyio-4.13.0
+collected 48 items
+
+tests\test_pawpal.py ................................................    [100%]
+
+============================= 48 passed in 0.05s ==============================
 ```
+
+### Confidence Level: ★★★★☆ (4 / 5)
+
+All 48 tests pass, covering every core behavior plus important edge cases (fixed-time
+bounds, blocked windows, the no-overlap invariant, recurrence boundaries, and
+cross-pet conflicts). I hold back the fifth star because a few edges are documented
+but not yet tested — notably input validation (zero/negative task durations) and
+fragmented free time (a task larger than any single gap but smaller than the total
+remaining time). The logic is reliable for realistic use; these are the areas I'd
+harden next.
 
 ## 📐 Smarter Scheduling
 
